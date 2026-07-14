@@ -102,6 +102,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:v
 .list-actions .edit-btn{background:var(--pri);color:#fff}
 .list-actions .export-pdf-btn{background:var(--ok);color:#fff}
 .list-actions .export-json-btn{background:var(--warn);color:#fff}
+.list-actions .delete-btn{background:var(--danger);color:#fff}
 
 /* === MODAL === */
 .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:200;align-items:center;justify-content:center}
@@ -251,6 +252,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:v
 <div class="list-scroll" id="record-list"></div>
 <div class="list-actions">
   <button class="edit-btn" onclick="editSelected()">编辑 Sửa</button>
+  <button class="delete-btn" onclick="deleteSelected()">删除 Xóa</button>
   <button class="export-pdf-btn" onclick="exportSelectedPDF()">导出PDF Xuất PDF</button>
   <button class="export-json-btn" onclick="exportSelectedJSON()">导出JSON Xuất JSON</button>
 </div>
@@ -268,6 +270,10 @@ body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:v
     <button class="confirm-btn" onclick="confirmReorder()">确认 OK</button>
     <button class="cancel-btn" onclick="closeReorder()">取消 Hủy</button>
   </div>
+</div>
+</div>
+
+<!-- API KEY MODAL -->
 <div class="apikey-overlay" id="apikey-overlay">
   <div class="apikey-box">
     <h3>设置 Gemini API Key</h3>
@@ -277,8 +283,6 @@ body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:v
       <button class="save-btn" onclick="saveApiKey()">保存</button>
     </div>
   </div>
-</div>
-</div>
 </div>
 
 <script>
@@ -492,7 +496,7 @@ function bindPhotoGridClick() {
     if (currentPhotos.length === 0) {
       pickPhotos();
     } else if (e.target.closest('.photo-placeholder')) {
-      // Placeholder "+2"/"+3" — open reorder or add more photos
+      // Placeholder "+2"/"+3" - open reorder or add more photos
       if (currentPhotos.length < 6) {
         pickPhotos();
       } else {
@@ -659,7 +663,7 @@ function renderDescs() {
 }
 
 function startEditDesc(idx) {
-  if (confirm('删除此描述项？/ Xóa mô tả này?')) {
+  if (confirm('删除此描述项?/ Xóa mô tả này?')) {
     currentDescs.splice(idx, 1);
     renderDescs();
     debounceAutoSave();
@@ -677,7 +681,7 @@ async function translateDescItem(item) {
   var text = item.text;
   if (!text) return;
   var url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + apiKey;
-  var prompt = 'Translate the following text completely and fully. If it is in Chinese, translate ALL of it to Vietnamese — every single sentence, clause, and phrase. If it is in Vietnamese, translate ALL of it to Chinese — every single sentence, clause, and phrase. Do NOT skip, abbreviate, or summarize any part. Do NOT output only a subset. Output ONLY the full complete translation, nothing else.\n\nText: ' + text;
+  var prompt = 'Translate the following text completely and fully. If it is in Chinese, translate ALL of it to Vietnamese - every single sentence, clause, and phrase. If it is in Vietnamese, translate ALL of it to Chinese - every single sentence, clause, and phrase. Do NOT skip, abbreviate, or summarize any part. Do NOT output only a subset. Output ONLY the full complete translation, nothing else.\n\nText: ' + text;
   try {
     var resp = await fetch(url, {
       method: 'POST',
@@ -882,7 +886,7 @@ async function translateLine(line) {
   var text = line.text;
   if (!text) return;
   var url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + apiKey;
-  var prompt = 'Translate the following text completely and fully. If it is in Chinese, translate ALL of it to Vietnamese — every single sentence, clause, and phrase. If it is in Vietnamese, translate ALL of it to Chinese — every single sentence, clause, and phrase. Do NOT skip, abbreviate, or summarize any part. Do NOT output only a subset. Output ONLY the full complete translation, nothing else.\n\nText: ' + text;
+  var prompt = 'Translate the following text completely and fully. If it is in Chinese, translate ALL of it to Vietnamese - every single sentence, clause, and phrase. If it is in Vietnamese, translate ALL of it to Chinese - every single sentence, clause, and phrase. Do NOT skip, abbreviate, or summarize any part. Do NOT output only a subset. Output ONLY the full complete translation, nothing else.\n\nText: ' + text;
   try {
     var resp = await fetch(url, {
       method: 'POST',
@@ -918,7 +922,7 @@ async function translateLine(line) {
 var previewWin = null;
 
 function buildPrintPageHTML(rec) {
-  // Build A4 landscape popup — mirrors input page layout & font sizes exactly,
+  // Build A4 landscape popup - mirrors input page layout & font sizes exactly,
   // but constrained to ONE page with overflow:hidden
   var author = rec.author || '-';
   var project = rec.project || '-';
@@ -1056,7 +1060,7 @@ function buildPrintPageHTML(rec) {
   html += '</div></div></div>';
   html += '</div>';
 
-  // No nav buttons inside iframe — parent page already has them
+  // No nav buttons inside iframe - parent page already has them
 
   html += '</body></html>';
   return html;
@@ -1172,6 +1176,22 @@ function getSelectedRecords() {
   });
 }
 
+async function deleteSelected() {
+  if (!selectedRecords.length) { alert('请先选择记录'); return; }
+  if (!db) { alert('数据库未就绪'); return; }
+  var count = selectedRecords.length;
+  if (!confirm('确认删除 ' + count + ' 条记录? / Xác nhận xóa ' + count + ' bản ghi?')) return;
+  var tx = db.transaction(DB_STORE, 'readwrite');
+  var store = tx.objectStore(DB_STORE);
+  selectedRecords.forEach(function(id) {
+    store.delete(id);
+  });
+  tx.oncomplete = function() {
+    selectedRecords = [];
+    showList(); // refresh list
+  };
+}
+
 async function editSelected() {
   if (!selectedRecords.length) { alert('请先选择一条记录'); return; }
   if (selectedRecords.length > 1) { alert('编辑只能选择一条记录'); return; }
@@ -1205,7 +1225,29 @@ async function editSelected() {
 async function exportSelectedPDF() {
   var recs = await getSelectedRecords();
   if (!recs || !recs.length) return;
-  var w = window.open('', '_blank', 'width=800,height=600');
+  // Build preview HTML in an iframe (mobile-safe, no window.open)
+  var html = buildExportPDFHTML(recs);
+  var iframe = document.createElement('iframe');
+  iframe.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;z-index:300;border:none';
+  iframe.srcdoc = html;
+  document.body.appendChild(iframe);
+  // Add close button overlay
+  var overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;top:10px;right:10px;z-index:301;display:flex;gap:8px';
+  var closeBtn = document.createElement('button');
+  closeBtn.textContent = '关闭 Đóng';
+  closeBtn.style.cssText = 'background:#ef4444;color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:1rem;font-weight:600;cursor:pointer';
+  closeBtn.onclick = function() { document.body.removeChild(iframe); document.body.removeChild(overlay); };
+  var printBtn = document.createElement('button');
+  printBtn.textContent = '打印 In';
+  printBtn.style.cssText = 'background:#4f46e5;color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:1rem;font-weight:600;cursor:pointer';
+  printBtn.onclick = function() { iframe.contentWindow.print(); };
+  overlay.appendChild(closeBtn);
+  overlay.appendChild(printBtn);
+  document.body.appendChild(overlay);
+}
+
+function buildExportPDFHTML(recs) {
   var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>特别注意事项简报</title>';
   html += '<style>';
   html += '@page{size:A4;margin:15mm}';
@@ -1223,9 +1265,7 @@ async function exportSelectedPDF() {
   html += '.line .num{color:#4f46e5;font-weight:700;min-width:8mm}';
   html += '.line .text{flex:1}';
   html += '.line .trans{color:#64748b;font-size:9pt;margin-left:2mm}';
-  html += '@media print{body{padding:0}.no-print{display:none}}';
-  html += '.no-print{text-align:center;margin-top:10mm}';
-  html += '.btn-print{background:#4f46e5;color:#fff;border:none;border-radius:8px;padding:6mm 15mm;font-size:11pt;cursor:pointer}';
+  html += '@media print{body{padding:0}}';
   html += '</style></head><body>';
 
   recs.forEach(function(rec, ri) {
@@ -1265,10 +1305,8 @@ async function exportSelectedPDF() {
     });
     html += '</div>';
   });
-  html += '<div class="no-print"><button class="btn-print" onclick="window.print()">打印/保存PDF</button></div>';
   html += '</body></html>';
-  w.document.write(html);
-  w.document.close();
+  return html;
 }
 
 // ===== EXPORT JSON =====
@@ -1297,7 +1335,9 @@ async function exportSelectedJSON() {
   var a = document.createElement('a');
   a.href = url;
   a.download = 'special_attention_' + new Date().toISOString().slice(0,10) + '.json';
+  document.body.appendChild(a);
   a.click();
+  document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
 
@@ -1504,7 +1544,7 @@ function saveCurrentToDB(cb) {
     };
     tx.oncomplete = function() { if(cb) cb(); };
   } else {
-    // New record — but first check if same seqnum already exists, then update it instead
+    // New record - but first check if same seqnum already exists, then update it instead
     var seqnum = rec.seqnum;
     var tx1 = db.transaction(DB_STORE, 'readonly');
     var store1 = tx1.objectStore(DB_STORE);
@@ -1582,7 +1622,7 @@ function onJSONPicked(e) {
       var recs = Array.isArray(data) ? data : [data];
       importRecords(recs);
     } catch(err) {
-      alert('JSON文件解析失败：' + err.message);
+      alert('JSON文件解析失败:' + err.message);
     }
   };
   reader.readAsText(file);
