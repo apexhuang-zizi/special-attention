@@ -148,8 +148,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:v
   <span class="save-badge hidden" id="save-badge">已保存 ✓</span>
   <button class="header-btn" onclick="showPreview()">预览打印<br>Xem/In</button>
   <button class="header-btn" onclick="importJSON()">导入<br>Nhập</button>
-  <button class="header-btn" onclick="showList()">编辑<br>Sửa</button>
-  <button class="header-btn" onclick="exportCurrentJSON()">导出<br>Xuất</button>
+  <button class="header-btn" onclick="showList()">编辑/导出<br>Sửa/Xuất</button>
   <button class="header-btn" onclick="toggleFullscreen()">⛶</button>
 </div>
 
@@ -1248,64 +1247,33 @@ async function exportSelectedPDF() {
 }
 
 function buildExportPDFHTML(recs) {
-  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>特别注意事项简报</title>';
-  html += '<style>';
-  html += '@page{size:A4;margin:15mm}';
-  html += 'body{font-family:system-ui,sans-serif;color:#1e293b;line-height:1.6;font-size:11pt}';
-  html += '.page-break{page-break-after:always}';
-  html += '.record{margin-bottom:20mm}';
-  html += '.title{font-size:14pt;font-weight:700;color:#4f46e5;text-align:center;margin-bottom:2mm}';
-  html += '.title small{font-size:9pt;color:#64748b;display:block}';
-  html += '.meta{font-size:9pt;color:#64748b;border-bottom:1px solid #e2e8f0;padding-bottom:3mm;margin-bottom:8mm;display:flex;gap:6mm;flex-wrap:wrap}';
-  html += '.photos{display:flex;gap:2mm;margin-bottom:8mm}';
-  html += '.photos .p-main{width:50%}';
-  html += '.photos .p-side{width:50%;display:flex;flex-direction:column;gap:2mm}';
-  html += '.photos img{width:100%;border-radius:2mm;object-fit:cover}';
-  html += '.line{font-size:10pt;margin-bottom:2mm;display:flex;gap:2mm}';
-  html += '.line .num{color:#4f46e5;font-weight:700;min-width:8mm}';
-  html += '.line .text{flex:1}';
-  html += '.line .trans{color:#64748b;font-size:9pt;margin-left:2mm}';
-  html += '@media print{body{padding:0}}';
-  html += '</style></head><body>';
-
-  recs.forEach(function(rec, ri) {
-    if (ri > 0) html += '<div class="page-break"></div>';
-    html += '<div class="record">';
-    html += '<div class="title">特别注意事项简报<small>Nhật ký lưu ý đặc biệt</small></div>';
-    html += '<div class="meta">';
-    html += '<span>录入人/Người nhập: ' + escHtml(rec.author||'-') + '</span>';
-    html += '<span>日期/Ngày: ' + (rec.date||'-') + '</span>';
-    if (rec.seqnum) html += '<span>编号/Số: ' + rec.seqnum + '</span>';
-    html += '<span>场所/Nơi: ' + escHtml(rec.place||'-') + '</span>';
-    html += '<span>项目ID/Mã: ' + escHtml(rec.project||'-') + '</span>';
-    if (rec.category) html += '<span>类别/Loại: ' + escHtml(rec.category) + '</span>';
-    html += '</div>';
-    if (rec.description) {
-      html += '<div style="font-size:10pt;margin-bottom:3mm">问题描述/Mô tả: ' + escHtml(rec.description) + '</div>';
-      if (rec.descTranslation) {
-        html += '<div style="font-size:9pt;color:#64748b;margin-bottom:3mm">' + escHtml(rec.descTranslation) + '</div>';
-      }
-    }
-    if (rec.photos && rec.photos.length) {
-      html += '<div class="photos">';
-      html += '<div class="p-main"><img src="' + rec.photos[0] + '"></div>';
-      html += '<div class="p-side">';
-      if (rec.photos.length >= 2) html += '<img src="' + rec.photos[1] + '">';
-      if (rec.photos.length >= 3) html += '<img src="' + rec.photos[2] + '">';
-      html += '</div></div>';
-    }
-    (rec.lines||[]).forEach(function(line) {
-      if (line.text) {
-        html += '<div class="line">';
-        html += '<span class="num">' + line.num + '</span>';
-        html += '<span class="text">' + escHtml(line.text) + '</span>';
-        if (line.translation) html += '<span class="trans">' + escHtml(line.translation) + '</span>';
-        html += '</div>';
-      }
-    });
-    html += '</div>';
+  // Reuse buildPrintPageHTML: each record gets its own A4 landscape page
+  // For single record: just return buildPrintPageHTML directly
+  // For multiple: extract each record's body content, merge with shared CSS
+  if (recs.length === 1) {
+    return buildPrintPageHTML(recs[0]);
+  }
+  // Multiple records: build combined doc with page-break between each
+  // Extract the CSS from buildPrintPageHTML by calling it once and parsing
+  var single = buildPrintPageHTML(recs[0]);
+  var cssMatch = single.match(/<style>([\s\S]*?)<\/style>/);
+  var sharedCSS = cssMatch ? cssMatch[1] : '';
+  // Add page-break rule
+  sharedCSS += '.export-page{page-break-after:always}.export-page:last-child{page-break-after:auto}';
+  // Extract each record's body content
+  var bodyParts = recs.map(function(rec) {
+    var recHTML = buildPrintPageHTML(rec);
+    var bodyMatch = recHTML.match(/<body[^>]*>([\s\S]*?)<\/body>/);
+    return bodyMatch ? bodyMatch[1] : ''; 
   });
-  html += '</body></html>';
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>特别注意事项简报</title>';  
+  html += '<style>' + sharedCSS + '</style></head><body style="display:flex;flex-direction:column;height:auto">';
+  bodyParts.forEach(function(part, i) {
+    html += '<div class="export-page" style="display:flex;flex-direction:column;height:100vh">';
+    html += part;
+    html += '</div>';  
+  });
+  html += '</body></html>';  
   return html;
 }
 
