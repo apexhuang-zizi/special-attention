@@ -231,8 +231,14 @@ body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:v
   <div class="title">特别注意<small>Lưu ý đặc biệt</small></div>
   <button class="header-btn" onclick="goBack()">← 返回</button>
 </div>
-<div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--text2);font-size:1.2rem">
-  预览打印窗口已打开 / Cửa sổ xem trước đã mở
+<div style="flex:1;display:flex;flex-direction:column;overflow:hidden">
+  <iframe id="preview-iframe" style="flex:1;width:100%;border:none"></iframe>
+</div>
+<div id="preview-footer" style="display:flex;gap:8px;padding:8px 10px;justify-content:center;flex-shrink:0">
+  <button class="pf-btn" onclick="goBack()">取消</button>
+  <button class="pf-btn pf-print" onclick="doPrintPreview()">打印</button>
+  <button class="pf-btn" onclick="previewPrevInline()">上一个</button>
+  <button class="pf-btn" onclick="previewNextInline()">下一个</button>
 </div>
 </div>
 
@@ -344,7 +350,7 @@ function openDB(cb) {
     }
   };
   req.onsuccess = function(e) { db = e.target.result; if(cb) cb(); };
-  req.onerror = function(e) { console.error('IndexedDB error', e); };
+  req.onerror = function(e) { console.error('IndexedDB error', e); if (!getApiKey()) showApiKeyModal(); };
 }
 
 // ===== DRAFT (localStorage) =====
@@ -756,6 +762,10 @@ function saveApiKey() {
 })();
 
 // ===== FULLSCREEN =====
+function doPrintPreview() {
+  var iframe = document.getElementById('preview-iframe');
+  try { iframe.contentWindow.print(); } catch(e) { alert('请手动使用浏览器打印功能'); }
+}
 function toggleFullscreen() {
   if (document.fullscreenElement || document.webkitFullscreenElement) {
     (document.exitFullscreen || document.webkitExitFullscreen).call(document);
@@ -877,15 +887,8 @@ function buildPrintPageHTML(rec) {
   html += '.line-item .line-num{font-size:.88rem;color:var(--pri);font-weight:700;margin-right:4px;float:left;min-width:14px}';
   html += '.line-item .line-content{font-size:1rem;color:var(--text);white-space:pre-wrap;word-break:break-word}';
   html += '.line-item .line-translation{font-size:1rem;color:var(--text2);margin-top:1px;white-space:pre-wrap;word-break:break-word;padding-left:18px}';
-  // === Nav buttons (hidden when printing) ===
-  html += '.p-nav{background:var(--card);border-top:1px solid var(--border);padding:6px 8px;display:flex;gap:8px;flex-shrink:0;justify-content:center}';
-  html += '.p-nav button{border:none;border-radius:6px;padding:7px 14px;font-size:.88rem;font-weight:600;cursor:pointer}';
-  html += '.p-btn-cancel{background:var(--bg);color:var(--text2);border:1px solid var(--border)}';
-  html += '.p-btn-print{background:var(--pri);color:#fff}';
-  html += '.p-btn-prev{background:#f59e0b;color:#fff}';
-  html += '.p-btn-next{background:#22c55e;color:#fff}';
-  // === Print: hide nav, exact A4 one page ===
-  html += '@media print{.p-nav{display:none!important}html,body{height:auto;overflow:visible;background:#fff}.photo-grid{border:2px solid #e2e8f0}}';
+  // === Print: exact A4 one page ===
+  html += '@media print{html,body{height:auto;overflow:visible;background:#fff}.photo-grid{border:2px solid #e2e8f0}}';
   html += '</style></head><body style="display:flex;flex-direction:column;height:100vh">';
 
   // Header (same purple bar as input page)
@@ -963,13 +966,7 @@ function buildPrintPageHTML(rec) {
   html += '</div></div></div>';
   html += '</div>';
 
-  // Nav buttons (hidden when printing)
-  html += '<div class="p-nav">';
-  html += '<button class="p-btn-cancel" onclick="window.close()">取消 Hủy</button>';
-  html += '<button class="p-btn-print" onclick="window.print()">打印 In</button>';
-  html += '<button class="p-btn-prev" onclick="window.opener.previewPrevPopup()">上一个 ←</button>';
-  html += '<button class="p-btn-next" onclick="window.opener.previewNextPopup()">下一个 →</button>';
-  html += '</div>';
+  // No nav buttons inside iframe — parent page already has them
 
   html += '</body></html>';
   return html;
@@ -997,35 +994,26 @@ function showPreview() {
     photos: currentPhotos,
     lines: currentLines
   };
-  // Open popup window
-  previewWin = window.open('', 'preview_print', 'width=1100,height=750');
-  if (previewWin) {
-    previewWin.document.write(buildPrintPageHTML(curRec));
-    previewWin.document.close();
-  } else {
-    alert('请允许弹出窗口以查看打印预览');
-  }
+  // Show in inline iframe
+  var iframe = document.getElementById('preview-iframe');
+  iframe.srcdoc = buildPrintPageHTML(curRec);
   showPage('page-preview');
 }
 
-function previewPrevPopup() {
+function previewPrevInline() {
   if (previewAllRecs.length === 0) { return; }
   if (previewCurrentIdx <= 0) { return; }
   previewCurrentIdx--;
-  if (previewWin && !previewWin.closed) {
-    previewWin.document.write(buildPrintPageHTML(previewAllRecs[previewCurrentIdx]));
-    previewWin.document.close();
-  }
+  var iframe = document.getElementById('preview-iframe');
+  iframe.srcdoc = buildPrintPageHTML(previewAllRecs[previewCurrentIdx]);
 }
 
-function previewNextPopup() {
+function previewNextInline() {
   if (previewAllRecs.length === 0) { return; }
   if (previewCurrentIdx >= previewAllRecs.length - 1) { return; }
   previewCurrentIdx++;
-  if (previewWin && !previewWin.closed) {
-    previewWin.document.write(buildPrintPageHTML(previewAllRecs[previewCurrentIdx]));
-    previewWin.document.close();
-  }
+  var iframe = document.getElementById('preview-iframe');
+  iframe.srcdoc = buildPrintPageHTML(previewAllRecs[previewCurrentIdx]);
 }
 
 // ===== LIST PAGE =====
@@ -1081,6 +1069,7 @@ function toggleSelect(id) {
 
 function getSelectedRecords() {
   if (!selectedRecords.length) { alert('请先选择记录'); return null; }
+  if (!db) { alert('数据库未就绪'); return null; }
   var tx = db.transaction(DB_STORE, 'readonly');
   var store = tx.objectStore(DB_STORE);
   var results = [];
@@ -1365,22 +1354,24 @@ function confirmReorder() {
 
 // ===== ARCHIVE & NEW FORM =====
 function archiveAndNewForm() {
-  // If there's data worth saving, save it first
   var hasData = currentPhotos.length > 0 || currentLines.length > 0 || currentDescs.length > 0
     || document.getElementById('inp-author').value.trim()
     || document.getElementById('inp-place').value;
   if (hasData) {
     saveDraft();
-    // Also save to IndexedDB for archival
-    saveCurrentToDB(function() {
+    if (db) {
+      saveCurrentToDB(function() { doNewForm(); });
+    } else {
+      // IndexedDB not available, just proceed
       doNewForm();
-    });
+    }
   } else {
     doNewForm();
   }
 }
 
 function saveCurrentToDB(cb) {
+  if (!db) { if(cb) cb(); return; }
   var rec = {
     id: editingId || ('rec_' + Date.now()),
     author: document.getElementById('inp-author').value.trim(),
@@ -1552,13 +1543,27 @@ function exportCurrentJSON() {
     createdAt: Date.now()
   };
   var json = JSON.stringify(rec, null, 2);
-  var blob = new Blob([json], {type: 'application/json'});
-  var url = URL.createObjectURL(blob);
-  var a = document.createElement('a');
-  a.href = url;
-  a.download = 'special_attention_' + rec.seqnum + '_' + new Date().toISOString().slice(0,10) + '.json';
-  a.click();
-  URL.revokeObjectURL(url);
+  // Try download first
+  try {
+    var blob = new Blob([json], {type: 'application/json'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'special_attention_' + rec.seqnum + '_' + new Date().toISOString().slice(0,10) + '.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+  } catch(e) {
+    // Fallback: show JSON in textarea for manual copy
+    var ta = document.createElement('textarea');
+    ta.value = json;
+    ta.style.cssText = 'position:fixed;inset:10%;width:80%;height:80%;z-index:999;font-size:12px';
+    document.body.appendChild(ta);
+    ta.select();
+    alert('请复制此JSON文本保存 / Copy this JSON to save');
+    document.body.removeChild(ta);
+  }
 }
 
 
