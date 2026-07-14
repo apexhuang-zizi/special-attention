@@ -206,7 +206,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:v
     <div class="photo-section">
       <div class="label">问题描述 / Mô tả vấn đề</div>
       <div class="desc-display" id="desc-display"></div>
-      <input id="inp-desc" class="desc-input" type="text" placeholder="输入后回车提交 / Nhập nội dung, nhấn Enter">
+      <input id="inp-desc" class="desc-input" type="text" placeholder="输入后回车或点击下一步提交 / Nhập, nhấn Enter hoặc Done">
       <div class="photo-grid empty" id="photo-grid">
         <span>+ 添加照片 / Thêm hình</span>
       </div>
@@ -342,11 +342,21 @@ function nextSeqNum() {
 }
 
 function openDB(cb) {
-  var req = indexedDB.open(DB_NAME, 1);
+  var req = indexedDB.open(DB_NAME, 2);
   req.onupgradeneeded = function(e) {
     var d = e.target.result;
     if (!d.objectStoreNames.contains(DB_STORE)) {
       d.createObjectStore(DB_STORE, {keyPath: 'id'});
+    }
+    // v2: add draftPhotos store for saving photos across refreshes
+    if (!d.objectStoreNames.contains('draftPhotos')) {
+      d.createObjectStore('draftPhotos', {keyPath: 'id'});
+    }
+    // Also add to existing DB if upgrading from v1
+    if (e.oldVersion < 2) {
+      if (!d.objectStoreNames.contains('draftPhotos')) {
+        d.createObjectStore('draftPhotos', {keyPath: 'id'});
+      }
     }
   };
   req.onsuccess = function(e) { db = e.target.result; if(cb) cb(); };
@@ -355,6 +365,7 @@ function openDB(cb) {
 
 // ===== DRAFT (localStorage) =====
 function saveDraft() {
+  // Save text fields to localStorage
   var draft = {
     author: document.getElementById('inp-author').value.trim(),
     project: document.getElementById('inp-project').value.trim(),
@@ -365,16 +376,23 @@ function saveDraft() {
     descItems: currentDescs,
     description: currentDescs.map(function(d){return d.text}).join('; '),
     descTranslation: currentDescs.map(function(d){return d.translation}).join("; "),
-    lines: currentLines,
-    photosCount: currentPhotos.length
+    lines: currentLines
   };
   localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
-  if (currentPhotos.length > 0) {
-    localStorage.setItem(DRAFT_KEY + '_photos', JSON.stringify(currentPhotos));
-  } else {
-    localStorage.removeItem(DRAFT_KEY + '_photos');
-  }
+  // Save photos to IndexedDB (too large for localStorage)
+  saveDraftPhotos();
   flashSaveBadge();
+}
+
+function saveDraftPhotos() {
+  if (!db) return;
+  var tx = db.transaction('draftPhotos', 'readwrite');
+  var store = tx.objectStore('draftPhotos');
+  // Clear old draft photos first
+  store.clear();
+  currentPhotos.forEach(function(photo, i) {
+    store.put({id: 'draft_' + i, data: photo});
+  });
 }
 
 function loadDraft() {
@@ -400,14 +418,36 @@ function loadDraft() {
       renderDescs();
     }
     if (draft.lines) { currentLines = draft.lines; renderLines(); }
-    var photoRaw = localStorage.getItem(DRAFT_KEY + '_photos');
-    if (photoRaw) { currentPhotos = JSON.parse(photoRaw); renderPhotos(); }
+    // Load photos from IndexedDB
+    loadDraftPhotos();
   } catch(e) { console.error('Draft load error', e); }
+}
+
+function loadDraftPhotos() {
+  if (!db) return;
+  try {
+    var tx = db.transaction('draftPhotos', 'readonly');
+    var store = tx.objectStore('draftPhotos');
+    var req = store.getAll();
+    req.onsuccess = function(e) {
+      var results = e.target.result;
+      if (results && results.length) {
+        currentPhotos = results.map(function(r) { return r.data; });
+        renderPhotos();
+      }
+    };
+  } catch(e) { console.error('Load draft photos error', e); }
 }
 
 function clearDraft() {
   localStorage.removeItem(DRAFT_KEY);
-  localStorage.removeItem(DRAFT_KEY + '_photos');
+  // Clear draft photos from IndexedDB
+  if (db) {
+    try {
+      var tx = db.transaction('draftPhotos', 'readwrite');
+      tx.objectStore('draftPhotos').clear();
+    } catch(e) {}
+  }
 }
 
 function flashSaveBadge() {
@@ -430,6 +470,11 @@ function debounceAutoSave() {
   if (autoSaveTimer) clearTimeout(autoSaveTimer);
   autoSaveTimer = setTimeout(function() { saveDraft(); }, 800);
 }
+
+// Save on page refresh/close
+window.addEventListener('beforeunload', function() {
+  saveDraft();
+});
 
 // ===== PAGE NAV =====
 function showPage(id) {
@@ -480,11 +525,43 @@ function onPhotosPicked(e) {
 function readPhoto(file) {
   var reader = new FileReader();
   reader.onload = function(e) {
-    currentPhotos.push(e.target.result);
-    renderPhotos();
-    debounceAutoSave();
+    compressPhoto(e.target.result, function(compressed) {
+      currentPhotos.push(compressed);
+      renderPhotos();
+      debounceAutoSave();
+    });
   };
   reader.readAsDataURL(file);
+}
+
+function compressPhoto(dataUrl, cb, quality) {
+  // Compress photo to under 100KB while maintaining aspect ratio
+  quality = quality || 0.7;
+  var img = new Image();
+  img.onload = function() {
+    var maxW = 1200, maxH = 900;
+    var w = img.width, h = img.height;
+    if (w > maxW) { h = h * maxW / w; w = maxW; }
+    if (h > maxH) { w = w * maxH / h; h = maxH; }
+    var canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    var ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, w, h);
+    // Try decreasing quality until under 100KB
+    var tryQ = quality;
+    var result = canvas.toDataURL('image/jpeg', tryQ);
+    while (tryQ > 0.1 && result.length > 100 * 1024 * 1.37) { // base64 ≈ 1.37x raw size
+      tryQ -= 0.1;
+      result = canvas.toDataURL('image/jpeg', tryQ);
+    }
+    // If still too large, reduce dimensions further
+    if (result.length > 100 * 1024 * 1.37) {
+      canvas.width = w * 0.5; canvas.height = h * 0.5;
+      result = canvas.toDataURL('image/jpeg', 0.5);
+    }
+    cb(result);
+  };
+  img.src = dataUrl;
 }
 
 function removePhoto(idx) {
@@ -539,18 +616,29 @@ var currentDescs = []; // [{text:'', translation:''}]
     descEl.addEventListener('keydown', function(e) {
       if (e.key === 'Enter') {
         e.preventDefault();
-        var text = descEl.value.trim();
-        if (!text) return;
-        var item = {text: text, translation: '(翻译中...)'};
-        currentDescs.push(item);
-        descEl.value = '';
-        renderDescs();
-        debounceAutoSave();
-        translateDescItem(item);
+        submitDescInput(descEl);
+      }
+    });
+    // Mobile: no Enter key, "next/done" triggers blur
+    descEl.addEventListener('blur', function() {
+      var text = descEl.value.trim();
+      if (text) {
+        submitDescInput(descEl);
       }
     });
   }
 })();
+
+function submitDescInput(el) {
+  var text = el.value.trim();
+  if (!text) return;
+  var item = {text: text, translation: '(翻译中...)'};
+  currentDescs.push(item);
+  el.value = '';
+  renderDescs();
+  debounceAutoSave();
+  translateDescItem(item);
+}
 
 function renderDescs() {
   var display = document.getElementById('desc-display');
@@ -632,9 +720,11 @@ function bindAddLineInput() {
     this.placeholder = '输入内容后回车提交 / Nhập nội dung, nhấn Enter';
   });
   addLineEl.addEventListener('blur', function() {
-    if (!this.value.trim()) {
-      this.placeholder = '+ 添加行 / Thêm dòng';
+    if (this.value.trim()) {
+      submitAddLine();
+      return;
     }
+    this.placeholder = '+ 添加行 / Thêm dòng';
   });
 }
 
