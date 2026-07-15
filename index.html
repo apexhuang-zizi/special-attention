@@ -45,6 +45,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:v
 .desc-input{border:1px solid var(--border);border-radius:5px;padding:10px 12px;font-size:1.4rem;background:var(--card);line-height:1.6;flex-shrink:0}
 .photo-grid{position:relative;background:var(--card);border:2px dashed var(--border);border-radius:var(--radius);overflow:hidden;flex:1;min-height:0;display:flex}
 .photo-grid.empty{display:flex;align-items:center;justify-content:center;color:var(--text2);font-size:.88rem;cursor:pointer}
+.photo-grid.drag-over{border-color:var(--pri);background:var(--pri-l);box-shadow:0 0 12px rgba(79,70,229,.3)}
 .photo-grid .photo-main{width:50%;position:relative;overflow:hidden;border-right:2px solid var(--border)}
 .photo-grid .photo-side{width:50%;position:relative;display:flex;flex-direction:column}
 .photo-grid .photo-2{height:50%;overflow:hidden;position:relative;border-bottom:2px solid var(--border)}
@@ -320,6 +321,9 @@ function init() {
   bindAutoSave();
   bindPhotoGridClick();
   bindAddLineInput();
+  // Prevent browser from navigating to dropped files on the whole page
+  document.body.addEventListener('dragover', function(e) { e.preventDefault(); });
+  document.body.addEventListener('drop', function(e) { e.preventDefault(); });
 }
 
 function loadSeqNum() {
@@ -490,19 +494,54 @@ function goBack() { showPage('page-input'); }
 function bindPhotoGridClick() {
   var grid = document.getElementById('photo-grid');
   grid.addEventListener('click', function(e) {
-    // Don't trigger if clicking remove button or overlay-count
     if (e.target.closest('.remove-btn') || e.target.closest('.overlay-count')) return;
     if (currentPhotos.length === 0) {
       pickPhotos();
     } else if (e.target.closest('.photo-placeholder')) {
-      // Placeholder "+2"/"+3" - open reorder or add more photos
-      if (currentPhotos.length < 6) {
-        pickPhotos();
-      } else {
-        openReorder();
-      }
+      if (currentPhotos.length < 6) { pickPhotos(); } else { openReorder(); }
     } else if (e.target.tagName === 'IMG') {
       openReorder();
+    }
+  });
+  // Drag & drop support: drag files from local folder / WeChat Desktop etc.
+  grid.addEventListener('dragover', function(e) {
+    e.preventDefault(); // Must prevent default to allow drop
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy'; // Show copy icon instead of forbidden
+    grid.classList.add('drag-over');
+    // Update placeholder text while dragging over empty grid
+    if (currentPhotos.length === 0) {
+      var span = grid.querySelector('span');
+      if (span) span.textContent = '↓ 拖入照片 / Kéo hình vào';
+    }
+  });
+  grid.addEventListener('dragleave', function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    grid.classList.remove('drag-over');
+    if (currentPhotos.length === 0) {
+      var span = grid.querySelector('span');
+      if (span) span.textContent = '+ 添加照片 / Thêm hình';
+    }
+  });
+  grid.addEventListener('drop', function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    grid.classList.remove('drag-over');
+    if (currentPhotos.length === 0) {
+      var span = grid.querySelector('span');
+      if (span) span.textContent = '+ 添加照片 / Thêm hình';
+    }
+    var files = e.dataTransfer.files;
+    if (!files || !files.length) return;
+    var remaining = 6 - currentPhotos.length;
+    if (remaining <= 0) { alert('最多6张照片 / Tối đa 6 hình'); return; }
+    var toProcess = Math.min(files.length, remaining);
+    for (var i = 0; i < toProcess; i++) {
+      // Only accept image files
+      if (files[i].type.startsWith('image/')) {
+        readPhoto(files[i]);
+      }
     }
   });
 }
@@ -1227,10 +1266,9 @@ async function exportSelectedPDF() {
   // Build preview HTML in an iframe (mobile-safe, no window.open)
   var html = buildExportPDFHTML(recs);
   var iframe = document.createElement('iframe');
-  iframe.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;z-index:300;border:none';
+  iframe.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;z-index:300;border:none;background:#fff';
   iframe.srcdoc = html;
   document.body.appendChild(iframe);
-  // Add close button overlay
   var overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed;top:10px;right:10px;z-index:301;display:flex;gap:8px';
   var closeBtn = document.createElement('button');
