@@ -42,6 +42,8 @@ body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:v
 .desc-item:last-child{border-bottom:none}
 .desc-item .desc-text{font-size:1.4rem;color:var(--text);white-space:pre-wrap;word-break:break-word}
 .desc-item .desc-trans{font-size:1.4rem;color:var(--text2);white-space:pre-wrap;word-break:break-word;margin-top:1px}
+.desc-item{cursor:pointer;border-radius:5px}
+.desc-item:hover{background:var(--card);box-shadow:0 0 0 1px var(--pri)}
 .desc-input{border:1px solid var(--border);border-radius:5px;padding:10px 12px;font-size:1.4rem;background:var(--card);line-height:1.6;flex-shrink:0}
 .photo-grid{position:relative;background:var(--card);border:2px dashed var(--border);border-radius:var(--radius);overflow:hidden;flex:1;min-height:0;display:flex}
 .photo-grid.empty{display:flex;align-items:center;justify-content:center;color:var(--text2);font-size:.88rem;cursor:pointer}
@@ -51,10 +53,21 @@ body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:v
 .photo-grid .photo-2{height:50%;overflow:hidden;position:relative;border-bottom:2px solid var(--border)}
 .photo-grid .photo-stack{height:50%;overflow:hidden;position:relative}
 .photo-grid img{width:100%;height:100%;object-fit:cover;display:block}
+.photo-grid video{width:100%;height:100%;object-fit:cover;display:block}
+.photo-grid .media-thumb{width:100%;height:100%;position:relative;overflow:hidden}
+.photo-grid .video-thumb{cursor:pointer}
+.photo-grid .video-badge{position:absolute;top:4px;left:4px;background:rgba(79,70,229,.85);color:#fff;padding:1px 6px;border-radius:4px;font-size:.65rem;font-weight:600;z-index:2;transition:opacity .3s}
 .photo-grid .overlay-count{position:absolute;bottom:5px;right:5px;background:var(--pri);color:#fff;border-radius:50%;width:26px;height:26px;font-size:.73rem;font-weight:700;display:flex;align-items:center;justify-content:center;cursor:pointer}
 .photo-grid .photo-placeholder{width:100%;height:100%;background:var(--pri-l);display:flex;align-items:center;justify-content:center;color:var(--text2);font-size:1.6rem;cursor:pointer;transition:background .2s}
 .photo-grid .photo-placeholder:hover{background:var(--pri);color:#fff}
 .photo-grid .remove-btn{position:absolute;top:3px;right:3px;background:var(--danger);color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:.63rem;cursor:pointer;z-index:5;display:flex;align-items:center;justify-content:center;line-height:1}
+/* === VIDEO PLAYER MODAL === */
+.video-modal{position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.92);display:flex;align-items:center;justify-content:center;padding:16px}
+.video-modal video{max-width:100%;max-height:calc(100vh - 60px);border-radius:8px;background:#000}
+.video-modal .vm-close{position:absolute;top:8px;right:8px;background:rgba(255,255,255,.15);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:.9rem;cursor:pointer;z-index:2}
+.video-modal .vm-close:hover{background:rgba(255,255,255,.3)}
+.video-modal .vm-back{position:absolute;top:8px;left:8px;background:rgba(255,255,255,.15);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:.9rem;cursor:pointer;z-index:2}
+.video-modal .vm-back:hover{background:rgba(255,255,255,.3)}
 /* === TEXT === */
 .text-section{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;flex:1;display:flex;flex-direction:column;min-height:0}
 .text-section .label{font-size:.8rem;font-weight:600;color:var(--text2);padding:5px 8px;border-bottom:1px solid var(--border);flex-shrink:0}
@@ -207,7 +220,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:v
     <div class="photo-section">
       <div class="label">问题描述 / Mô tả vấn đề</div>
       <div class="desc-display" id="desc-display"></div>
-      <input id="inp-desc" class="desc-input" type="text" placeholder="输入后回车或点击下一步提交 / Nhập, nhấn Enter hoặc Done">
+      <input id="inp-desc" class="desc-input" type="text" placeholder="输入后回车提交并自动翻译 / Nhập, Enter để dịch">
       <div class="photo-grid empty" id="photo-grid">
         <span>+ 添加照片 / Thêm hình</span>
       </div>
@@ -258,7 +271,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:v
 </div>
 </div>
 
-<input type="file" id="file-picker" accept="image/*" multiple style="display:none" onchange="onPhotosPicked(event)">
+<input type="file" id="file-picker" accept="image/*,video/*" multiple style="display:none" onchange="onPhotosPicked(event)">
 <input type="file" id="json-picker" accept=".json,application/json" style="display:none" onchange="onJSONPicked(event)">
 
 <!-- REORDER MODAL -->
@@ -290,7 +303,9 @@ body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:v
 var DB_NAME = 'special_attention_db';
 var DB_STORE = 'records';
 var db = null;
-var currentPhotos = [];
+var currentPhotos = []; // base64 strings
+var currentVideos = []; // Blob objects
+var videoThumbnails = []; // base64 strings (first frame of each video, for print/preview)
 var currentLines = [];
 var editingId = null;
 var selectedRecords = [];
@@ -321,6 +336,7 @@ function init() {
   bindAutoSave();
   bindPhotoGridClick();
   bindAddLineInput();
+  bindDescInput();
   // Prevent browser from navigating to dropped files on the whole page
   document.body.addEventListener('dragover', function(e) { e.preventDefault(); });
   document.body.addEventListener('drop', function(e) { e.preventDefault(); });
@@ -349,21 +365,22 @@ function nextSeqNum() {
 }
 
 function openDB(cb) {
-  var req = indexedDB.open(DB_NAME, 2);
+  var req = indexedDB.open(DB_NAME, 3);
   req.onupgradeneeded = function(e) {
     var d = e.target.result;
     if (!d.objectStoreNames.contains(DB_STORE)) {
       d.createObjectStore(DB_STORE, {keyPath: 'id'});
     }
-    // v2: add draftPhotos store for saving photos across refreshes
+    // v2: draftPhotos
     if (!d.objectStoreNames.contains('draftPhotos')) {
       d.createObjectStore('draftPhotos', {keyPath: 'id'});
     }
-    // Also add to existing DB if upgrading from v1
-    if (e.oldVersion < 2) {
-      if (!d.objectStoreNames.contains('draftPhotos')) {
-        d.createObjectStore('draftPhotos', {keyPath: 'id'});
-      }
+    // v3: draftVideos + recordVideos
+    if (!d.objectStoreNames.contains('draftVideos')) {
+      d.createObjectStore('draftVideos', {keyPath: 'id'});
+    }
+    if (!d.objectStoreNames.contains('recordVideos')) {
+      d.createObjectStore('recordVideos', {keyPath: 'id'});
     }
   };
   req.onsuccess = function(e) { db = e.target.result; if(cb) cb(); };
@@ -386,8 +403,9 @@ function saveDraft() {
     lines: currentLines
   };
   localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
-  // Save photos to IndexedDB (too large for localStorage)
+  // Save photos & videos to IndexedDB
   saveDraftPhotos();
+  saveDraftVideos();
   flashSaveBadge();
 }
 
@@ -399,6 +417,16 @@ function saveDraftPhotos() {
   store.clear();
   currentPhotos.forEach(function(photo, i) {
     store.put({id: 'draft_' + i, data: photo});
+  });
+}
+
+function saveDraftVideos() {
+  if (!db) return;
+  var tx = db.transaction('draftVideos', 'readwrite');
+  var store = tx.objectStore('draftVideos');
+  store.clear();
+  currentVideos.forEach(function(video, i) {
+    store.put({id: 'draft_vid_' + i, data: video});
   });
 }
 
@@ -427,6 +455,7 @@ function loadDraft() {
     if (draft.lines) { currentLines = draft.lines; renderLines(); }
     // Load photos from IndexedDB
     loadDraftPhotos();
+    loadDraftVideos();
   } catch(e) { console.error('Draft load error', e); }
 }
 
@@ -446,13 +475,33 @@ function loadDraftPhotos() {
   } catch(e) { console.error('Load draft photos error', e); }
 }
 
+function loadDraftVideos() {
+  if (!db) return;
+  try {
+    var tx = db.transaction('draftVideos', 'readonly');
+    var store = tx.objectStore('draftVideos');
+    var req = store.getAll();
+    req.onsuccess = function(e) {
+      var results = e.target.result;
+      if (results && results.length) {
+        currentVideos = results.map(function(r) { return r.data; });
+        renderPhotos(); // renderPhotos also renders videos in grid
+      }
+    };
+  } catch(e) { console.error('Load draft videos error', e); }
+}
+
 function clearDraft() {
   localStorage.removeItem(DRAFT_KEY);
-  // Clear draft photos from IndexedDB
+  // Clear draft photos & videos from IndexedDB
   if (db) {
     try {
       var tx = db.transaction('draftPhotos', 'readwrite');
       tx.objectStore('draftPhotos').clear();
+    } catch(e) {}
+    try {
+      var tx = db.transaction('draftVideos', 'readwrite');
+      tx.objectStore('draftVideos').clear();
     } catch(e) {}
   }
 }
@@ -464,7 +513,9 @@ function flashSaveBadge() {
 }
 
 function bindAutoSave() {
-  var ids = ['inp-author','inp-project','inp-place','inp-category','inp-desc'];
+  // Note: inp-desc is NOT included here — it has its own submit-on-Enter/blur logic
+  // Including it would trigger saveDraft on every keystroke, disrupting user input
+  var ids = ['inp-author','inp-project','inp-place','inp-category'];
   ids.forEach(function(id) {
     var el = document.getElementById(id);
     if (!el) return;
@@ -475,7 +526,7 @@ function bindAutoSave() {
 
 function debounceAutoSave() {
   if (autoSaveTimer) clearTimeout(autoSaveTimer);
-  autoSaveTimer = setTimeout(function() { saveDraft(); }, 800);
+  autoSaveTimer = setTimeout(function() { saveDraft(); }, 2000); // 2s debounce, less disruptive
 }
 
 // Save on page refresh/close
@@ -503,6 +554,32 @@ function bindPhotoGridClick() {
       openReorder();
     }
   });
+  // Hover auto-play for video thumbnails: mouseover → play, mouseout → pause+reset
+  grid.addEventListener('mouseover', function(e) {
+    var thumb = e.target.closest('.video-thumb');
+    if (!thumb) return;
+    var vid = thumb.querySelector('video[data-hover-play]');
+    if (vid && vid.paused) {
+      vid.currentTime = 0;
+      vid.play().catch(function(){});
+      var badge = thumb.querySelector('.video-badge');
+      if(badge) badge.style.opacity='0';
+    }
+  });
+  grid.addEventListener('mouseout', function(e) {
+    var thumb = e.target.closest('.video-thumb');
+    if (!thumb) return;
+    // Check if the mouse actually left the thumb (not just moved to a child)
+    var related = e.relatedTarget;
+    if (related && thumb.contains(related)) return;
+    var vid = thumb.querySelector('video[data-hover-play]');
+    if (vid) {
+      vid.pause();
+      vid.currentTime = 0;
+      var badge = thumb.querySelector('.video-badge');
+      if(badge) badge.style.opacity='1';
+    }
+  });
   // Drag & drop support: drag files from local folder / WeChat Desktop etc.
   grid.addEventListener('dragover', function(e) {
     e.preventDefault(); // Must prevent default to allow drop
@@ -510,45 +587,47 @@ function bindPhotoGridClick() {
     e.dataTransfer.dropEffect = 'copy'; // Show copy icon instead of forbidden
     grid.classList.add('drag-over');
     // Update placeholder text while dragging over empty grid
-    if (currentPhotos.length === 0) {
+    if (currentPhotos.length === 0 && currentVideos.length === 0) {
       var span = grid.querySelector('span');
-      if (span) span.textContent = '↓ 拖入照片 / Kéo hình vào';
+      if (span) span.textContent = '↓ 拖入照片/视频 / Kéo hình/video vào';
     }
   });
   grid.addEventListener('dragleave', function(e) {
     e.preventDefault();
     e.stopPropagation();
     grid.classList.remove('drag-over');
-    if (currentPhotos.length === 0) {
+    if (currentPhotos.length === 0 && currentVideos.length === 0) {
       var span = grid.querySelector('span');
-      if (span) span.textContent = '+ 添加照片 / Thêm hình';
+      if (span) span.textContent = '+ 添加照片/视频 / Thêm hình/video';
     }
   });
   grid.addEventListener('drop', function(e) {
     e.preventDefault();
     e.stopPropagation();
     grid.classList.remove('drag-over');
-    if (currentPhotos.length === 0) {
+    if (currentPhotos.length === 0 && currentVideos.length === 0) {
       var span = grid.querySelector('span');
-      if (span) span.textContent = '+ 添加照片 / Thêm hình';
+      if (span) span.textContent = '+ 添加照片/视频 / Thêm hình/video';
     }
     var files = e.dataTransfer.files;
     if (!files || !files.length) return;
-    var remaining = 6 - currentPhotos.length;
-    if (remaining <= 0) { alert('最多6张照片 / Tối đa 6 hình'); return; }
-    var toProcess = Math.min(files.length, remaining);
-    for (var i = 0; i < toProcess; i++) {
-      // Only accept image files
-      if (files[i].type.startsWith('image/')) {
+    var photoRemaining = 6 - currentPhotos.length;
+    var videoRemaining = 2 - currentVideos.length;
+    if (photoRemaining <= 0 && videoRemaining <= 0) { alert('照片和视频已满 / Hình và video đã đầy'); return; }
+    for (var i = 0; i < files.length; i++) {
+      if (files[i].type.startsWith('video/') && videoRemaining > 0) {
+        readVideo(files[i]);
+        videoRemaining--; // note: readVideo is async, check happens inside
+      } else if (files[i].type.startsWith('image/') && photoRemaining > 0) {
         readPhoto(files[i]);
+        photoRemaining--;
       }
     }
   });
 }
 
 function pickPhotos() {
-  var remaining = 6 - currentPhotos.length;
-  if (remaining <= 0) return;
+  // Open file picker for both photos and videos
   var fp = document.getElementById('file-picker');
   fp.value = '';
   fp.click();
@@ -557,10 +636,16 @@ function pickPhotos() {
 function onPhotosPicked(e) {
   var files = e.target.files;
   if (!files || !files.length) return;
-  var remaining = 6 - currentPhotos.length;
-  var toProcess = Math.min(files.length, remaining);
-  for (var i = 0; i < toProcess; i++) {
-    readPhoto(files[i]);
+  var photoRemaining = 6 - currentPhotos.length;
+  var videoRemaining = 2 - currentVideos.length;
+  for (var i = 0; i < files.length; i++) {
+    if (files[i].type.startsWith('video/') && videoRemaining > 0) {
+      readVideo(files[i]);
+      videoRemaining--; // async check inside readVideo
+    } else if (files[i].type.startsWith('image/') && photoRemaining > 0) {
+      readPhoto(files[i]);
+      photoRemaining--;
+    }
   }
 }
 
@@ -612,34 +697,74 @@ function removePhoto(idx) {
   debounceAutoSave();
 }
 
+function removeVideo(idx) {
+  if (currentVideos[idx] && currentVideos[idx]._blobUrl) {
+    URL.revokeObjectURL(currentVideos[idx]._blobUrl);
+  }
+  currentVideos.splice(idx, 1);
+  videoThumbnails.splice(idx, 1);
+  renderPhotos();
+  debounceAutoSave();
+}
+
+// Build combined media list: [{type:'photo'|'video', data:base64|Blob, idx:number}]
+function buildMediaList() {
+  var list = [];
+  currentPhotos.forEach(function(p, i) { list.push({type:'photo', data:p, idx:i}); });
+  currentVideos.forEach(function(v, i) { list.push({type:'video', data:v, idx:i}); });
+  return list;
+}
+
+function getVideoThumbUrl(videoBlob) {
+  // Create a persistent Blob URL for thumbnail / playback
+  if (videoBlob._blobUrl) return videoBlob._blobUrl;
+  videoBlob._blobUrl = URL.createObjectURL(videoBlob);
+  return videoBlob._blobUrl;
+}
+
 function renderPhotos() {
   var grid = document.getElementById('photo-grid');
-  if (currentPhotos.length === 0) {
+  var media = buildMediaList();
+  var total = media.length;
+  if (total === 0) {
     grid.className = 'photo-grid empty';
-    grid.innerHTML = '<span>+ 添加照片 / Thêm hình</span>';
+    grid.innerHTML = '<span>+ 添加照片/视频 / Thêm hình/video</span>';
     return;
   }
   grid.className = 'photo-grid';
   var html = '';
+  // Render media items into main + side layout (photos + videos combined)
+  function mediaItem(m) {
+    if (m.type === 'video') {
+      var url = getVideoThumbUrl(m.data);
+      return '<div class="media-thumb video-thumb" onclick="playVideo(' + m.idx + ');event.stopPropagation();" data-video-idx="' + m.idx + '">'
+        + '<video src="' + url + '" muted preload="metadata" loop data-hover-play></video>'
+        + '<div class="video-badge">▶ 视频</div>'
+        + '<button class="remove-btn" onclick="removeVideo(' + m.idx + ');event.stopPropagation();">✕</button>'
+        + '</div>';
+    }
+    return '<div class="media-thumb">'
+      + '<img src="' + m.data + '">'
+      + '<button class="remove-btn" onclick="removePhoto(' + m.idx + ');event.stopPropagation();">✕</button>'
+      + '</div>';
+  }
+  // Item 0 → main, item 1 → photo-2, item 2 → photo-stack
   html += '<div class="photo-main">';
-  html += '<img src="' + currentPhotos[0] + '">';
-  html += '<button class="remove-btn" onclick="removePhoto(0);event.stopPropagation();">✕</button>';
+  html += mediaItem(media[0]);
   html += '</div>';
   html += '<div class="photo-side">';
-  if (currentPhotos.length >= 2) {
+  if (total >= 2) {
     html += '<div class="photo-2">';
-    html += '<img src="' + currentPhotos[1] + '">';
-    html += '<button class="remove-btn" onclick="removePhoto(1);event.stopPropagation();">✕</button>';
+    html += mediaItem(media[1]);
     html += '</div>';
   } else {
     html += '<div class="photo-2"><div class="photo-placeholder">+2</div></div>';
   }
-  if (currentPhotos.length >= 3) {
-    var stackCount = currentPhotos.length - 2;
+  if (total >= 3) {
+    var stackCount = total - 2;
     html += '<div class="photo-stack">';
-    html += '<img src="' + currentPhotos[2] + '">';
+    html += mediaItem(media[2]);
     if (stackCount > 1) html += '<div class="overlay-count">+' + (stackCount-1) + '</div>';
-    html += '<button class="remove-btn" onclick="removePhoto(2);event.stopPropagation();">✕</button>';
     html += '</div>';
   } else {
     html += '<div class="photo-stack"><div class="photo-placeholder">+3</div></div>';
@@ -648,28 +773,163 @@ function renderPhotos() {
   grid.innerHTML = html;
 }
 
-// ===== DESC ITEMS (Enter-submit, like 关注与改善) =====
-var currentDescs = []; // [{text:'', translation:''}]
+// ===== VIDEO PLAYER =====
+function playVideo(idx) {
+  if (!currentVideos[idx]) return;
+  var url = getVideoThumbUrl(currentVideos[idx]);
+  var modal = document.createElement('div');
+  modal.className = 'video-modal';
+  modal.innerHTML = '<button class="vm-back" onclick="this.parentElement.remove()">↩ 返回</button>'
+    + '<button class="vm-close" onclick="this.parentElement.remove()">✕ 关闭</button>'
+    + '<video src="' + url + '" controls autoplay></video>';
+  document.body.appendChild(modal);
+  // Click outside video to close
+  modal.addEventListener('click', function(e) {
+    if (e.target === modal) modal.remove();
+  });
+  // ESC to close
+  modal.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') modal.remove();
+  });
+}
 
-// Bind desc Enter key (script in body, DOM already exists)
-(function() {
+// ===== VIDEO DURATION CHECK + COMPRESS =====
+var MAX_VIDEO_DURATION = 60; // 1 minute
+var MAX_VIDEO_SIZE = 20 * 1024 * 1024; // 20MB target after compress
+
+function checkAndAddVideo(file) {
+  // Step 1: Check duration via loading into <video> element
+  var tempUrl = URL.createObjectURL(file);
+  var v = document.createElement('video');
+  v.preload = 'metadata';
+  v.onloadedmetadata = function() {
+    URL.revokeObjectURL(tempUrl);
+    var dur = v.duration;
+    if (dur > MAX_VIDEO_DURATION) {
+      alert('视频时长 ' + Math.round(dur) + '秒，超过1分钟限制\nVideo duration ' + Math.round(dur) + 's, exceeds 1-minute limit');
+      return;
+    }
+    // Step 2: Compress video via MediaRecorder (re-encode at lower resolution/bitrate)
+    compressVideo(file, dur, function(compressedBlob) {
+      if (currentVideos.length >= 2) {
+        alert('最多2个视频 / Tối đa 2 video');
+        return;
+      }
+      currentVideos.push(compressedBlob);
+      // Extract thumbnail for print/preview
+      extractVideoThumbnail(compressedBlob, function(thumb) {
+        videoThumbnails.push(thumb || '');
+        renderPhotos();
+        debounceAutoSave();
+      });
+    });
+  };
+  v.src = tempUrl;
+}
+
+function compressVideo(file, duration, cb) {
+  // Browser-native video compression: play source video into canvas, record with MediaRecorder
+  var MAX_W = 640, MAX_H = 480;
+  var BITRATE = 500000; // 500kbps for <1min clips
+
+  var srcUrl = URL.createObjectURL(file);
+  var srcV = document.createElement('video');
+  srcV.muted = true;
+  srcV.playsInline = true;
+  srcV.preload = 'auto';
+
+  srcV.onloadedmetadata = function() {
+    var w = srcV.videoWidth, h = srcV.videoHeight;
+    if (w > MAX_W) { h = h * MAX_W / w; w = MAX_W; }
+    if (h > MAX_H) { w = w * MAX_H / h; h = MAX_H; }
+    w = Math.round(w); h = Math.round(h);
+
+    var canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    var ctx = canvas.getContext('2d');
+
+    var mimeType = 'video/webm;codecs=vp9';
+    if (!MediaRecorder.isTypeSupported(mimeType)) {
+      mimeType = 'video/webm;codecs=vp8';
+      if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/webm';
+    }
+
+    var recorder = new MediaRecorder(canvas.captureStream(30), { mimeType: mimeType, videoBitsPerSecond: BITRATE });
+    var chunks = [];
+    recorder.ondataavailable = function(e) { if (e.data.size > 0) chunks.push(e.data); };
+    recorder.onstop = function() {
+      URL.revokeObjectURL(srcUrl);
+      var blob = new Blob(chunks, { type: mimeType.split(';')[0] });
+      cb(blob);
+    };
+
+    srcV.onplay = function() {
+      recorder.start(100);
+      function drawFrame() {
+        if (srcV.paused || srcV.ended) { recorder.stop(); return; }
+        ctx.drawImage(srcV, 0, 0, w, h);
+        requestAnimationFrame(drawFrame);
+      }
+      drawFrame();
+    };
+    srcV.onended = function() {
+      // Wait a tick for recorder to finalize
+      setTimeout(function() { if (recorder.state === 'recording') recorder.stop(); }, 200);
+    };
+    srcV.src = srcUrl;
+    srcV.play();
+  }; // onloadedmetadata
+  srcV.src = srcUrl;
+}
+
+// Extract first frame of a video Blob as base64 thumbnail (for print/preview)
+function extractVideoThumbnail(videoBlob, cb) {
+  var url = URL.createObjectURL(videoBlob);
+  var v = document.createElement('video');
+  v.muted = true;
+  v.preload = 'auto';
+  v.onloadeddata = function() {
+    v.currentTime = 0.5; // Seek to 0.5s
+  };
+  v.onseeked = function() {
+    var canvas = document.createElement('canvas');
+    canvas.width = 320; canvas.height = 240;
+    var ctx = canvas.getContext('2d');
+    ctx.drawImage(v, 0, 0, 320, 240);
+    URL.revokeObjectURL(url);
+    cb(canvas.toDataURL('image/jpeg', 0.7));
+  };
+  v.onerror = function() {
+    URL.revokeObjectURL(url);
+    cb(null); // No thumbnail available
+  };
+  v.src = url;
+}
+
+function readVideo(file) {
+  checkAndAddVideo(file);
+}
+function bindDescInput() {
   var descEl = document.getElementById('inp-desc');
-  if (descEl) {
-    descEl.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        submitDescInput(descEl);
-      }
-    });
-    // Mobile: no Enter key, "next/done" triggers blur
-    descEl.addEventListener('blur', function() {
-      var text = descEl.value.trim();
-      if (text) {
-        submitDescInput(descEl);
-      }
-    });
-  }
-})();
+  if (!descEl) return;
+  descEl.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      submitDescInput(descEl);
+    }
+  });
+  descEl.addEventListener('focus', function() {
+    this.placeholder = '输入内容后回车提交并翻译 / Nhập, Enter để dịch';
+  });
+  descEl.addEventListener('blur', function() {
+    var text = this.value.trim();
+    if (text && text.length >= 5) {
+      submitDescInput(this);
+    } else {
+      this.placeholder = '输入后回车提交并自动翻译 / Nhập, Enter để dịch';
+    }
+  });
+}
 
 function submitDescInput(el) {
   var text = el.value.trim();
@@ -700,12 +960,73 @@ function renderDescs() {
   display.innerHTML = html;
 }
 
-function startEditDesc(idx) {
-  if (confirm('删除此描述项?/ Xóa mô tả này?')) {
-    currentDescs.splice(idx, 1);
-    renderDescs();
-    debounceAutoSave();
+//局部更新某项描述的DOM（翻译完成后用，避免重建整个desc-display打断用户操作）
+function updateDescItemDisplay(item) {
+  var display = document.getElementById('desc-display');
+  var idx = currentDescs.indexOf(item);
+  if (idx < 0 || !display.children[idx]) return;
+  var el = display.children[idx];
+  el.onclick = function() { startEditDesc(idx); }; // Restore click handler
+  var html = '<div class="desc-text">' + escHtml(item.text) + '</div>'; 
+  if (item.translation) {
+    html += '<div class="desc-trans">' + escHtml(item.translation) + '</div>'; 
   }
+  el.innerHTML = html;
+}
+
+function startEditDesc(idx) {
+  // Click on desc-item: enter inline edit mode (not delete)
+  var item = currentDescs[idx];
+  if (!item) return;
+  var display = document.getElementById('desc-display');
+  var el = display.children[idx];
+  if (!el) return;
+  // Replace this desc-item with an inline edit form
+  el.innerHTML = '<textarea class="desc-edit-text" rows="3" style="width:100%;font-size:1.4rem;border:1px solid var(--pri);border-radius:5px;padding:4px 8px;resize:vertical">' + escHtml(item.text) + '</textarea>'
+    + '<div style="display:flex;gap:4px;margin-top:4px">'
+    + '<button onclick="saveEditDesc(' + idx + ')" style="background:var(--pri);color:#fff;border:none;border-radius:5px;padding:4px 12px;font-size:.8rem">✓ 保存并翻译</button>'
+    + '<button onclick="cancelEditDesc(' + idx + ')" style="background:var(--border);color:var(--text);border:none;border-radius:5px;padding:4px 12px;font-size:.8rem">取消</button>'
+    + '<button onclick="deleteDesc(' + idx + ')" style="background:var(--danger);color:#fff;border:none;border-radius:5px;padding:4px 12px;font-size:.8rem">🗑 删除</button>'
+    + '</div>';
+  el.onclick = null; // Remove click handler while editing
+  var textarea = el.querySelector('.desc-edit-text');
+  textarea.focus();
+  textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+  // Enter to save, Escape to cancel
+  textarea.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEditDesc(idx); }
+    if (e.key === 'Escape') { e.preventDefault(); cancelEditDesc(idx); }
+  });
+}
+
+function saveEditDesc(idx) {
+  var display = document.getElementById('desc-display');
+  var el = display.children[idx];
+  var textarea = el.querySelector('.desc-edit-text');
+  if (!textarea) return;
+  var newText = textarea.value.trim();
+  if (!newText) { deleteDesc(idx); return; }
+  var oldText = currentDescs[idx].text;
+  currentDescs[idx].text = newText;
+  // Re-translate if text changed
+  if (newText !== oldText) {
+    currentDescs[idx].translation = ''; // Clear old translation
+    renderDescs();
+    translateDescItem(currentDescs[idx]); // Async translate
+  } else {
+    renderDescs();
+  }
+  debounceAutoSave();
+}
+
+function cancelEditDesc(idx) {
+  renderDescs(); // Just re-render to restore original view
+}
+
+function deleteDesc(idx) {
+  currentDescs.splice(idx, 1);
+  renderDescs();
+  debounceAutoSave();
 }
 
 async function translateDescItem(item) {
@@ -713,7 +1034,7 @@ async function translateDescItem(item) {
   if (!apiKey) {
     showApiKeyModal();
     item.translation = '(请先设置Gemini API Key)';
-    renderDescs();
+    updateDescItemDisplay(item);
     return;
   }
   var text = item.text;
@@ -745,7 +1066,8 @@ async function translateDescItem(item) {
     item.translation = '(翻译出错)';
     console.error('Desc translate error:', e);
   }
-  renderDescs();
+  //局部更新：只刷新翻译了的那一项，不重建整个desc-display DOM
+  updateDescItemDisplay(item);
   debounceAutoSave();
 }
 
@@ -1521,6 +1843,7 @@ function saveCurrentToDB(cb) {
     descItems: currentDescs,
     lines: currentLines,
     photos: currentPhotos,
+    videoThumbnails: videoThumbnails, // base64 thumbnails for print/preview
     createdAt: editingId ? undefined : Date.now()
   };
   if (editingId) {
@@ -1542,13 +1865,14 @@ function saveCurrentToDB(cb) {
         existing.descItems = rec.descItems;
         existing.lines = rec.lines;
         existing.photos = rec.photos;
+        existing.videoThumbnails = rec.videoThumbnails;
         store.put(existing);
       } else {
         rec.createdAt = Date.now();
         store.put(rec);
       }
     };
-    tx.oncomplete = function() { if(cb) cb(); };
+    tx.oncomplete = function() { saveRecordVideos(rec.id, cb); };
   } else {
     // New record - but first check if same seqnum already exists, then update it instead
     var seqnum = rec.seqnum;
@@ -1574,19 +1898,33 @@ function saveCurrentToDB(cb) {
         existing.descItems = rec.descItems;
         existing.lines = rec.lines;
         existing.photos = rec.photos;
+        existing.videoThumbnails = rec.videoThumbnails;
         var tx2 = db.transaction(DB_STORE, 'readwrite');
         var store2 = tx2.objectStore(DB_STORE);
         store2.put(existing);
-        tx2.oncomplete = function() { if(cb) cb(); };
+        tx2.oncomplete = function() { saveRecordVideos(existing.id, cb); };
       } else {
         // Truly new record
         var tx2 = db.transaction(DB_STORE, 'readwrite');
         var store2 = tx2.objectStore(DB_STORE);
         store2.put(rec);
-        tx2.oncomplete = function() { if(cb) cb(); };
+        tx2.oncomplete = function() { saveRecordVideos(rec.id, cb); };
       }
     };
   }
+}
+
+// Save video Blobs to recordVideos store (separate from record metadata)
+function saveRecordVideos(recId, cb) {
+  if (!db || currentVideos.length === 0) { if(cb) cb(); return; }
+  var tx = db.transaction('recordVideos', 'readwrite');
+  var store = tx.objectStore('recordVideos');
+  // Clear old videos for this record
+  // Store each video blob with record id as prefix
+  currentVideos.forEach(function(blob, i) {
+    store.put({id: recId + '_vid_' + i, data: blob});
+  });
+  tx.oncomplete = function() { if(cb) cb(); };
 }
 
 function doNewForm() {
@@ -1594,6 +1932,8 @@ function doNewForm() {
   clearDraft();
   editingId = null;
   currentPhotos = [];
+  currentVideos = [];
+  videoThumbnails = [];
   currentLines = [];
   currentDescs = [];
   document.getElementById('inp-project').value = '';
