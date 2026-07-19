@@ -277,7 +277,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:v
 <!-- REORDER MODAL -->
 <div class="reorder-overlay" id="reorder-overlay">
 <div class="reorder-box">
-  <h3>调换照片顺序 / Thay đổi thứ tự hình</h3>
+  <h3>调换媒体顺序 / Thay đổi thứ tự media</h3>
   <div class="reorder-list" id="reorder-list"></div>
   <div class="reorder-actions">
     <button class="confirm-btn" onclick="confirmReorder()">确认 OK</button>
@@ -306,6 +306,7 @@ var db = null;
 var currentPhotos = []; // base64 strings
 var currentVideos = []; // Blob objects
 var videoThumbnails = []; // base64 strings (first frame of each video, for print/preview)
+var mediaOrder = []; // [{type:'photo'|'video', idx:number}] - mixed display order
 var currentLines = [];
 var currentDescs = [];
 var editingId = null;
@@ -514,7 +515,7 @@ function flashSaveBadge() {
 }
 
 function bindAutoSave() {
-  // Note: inp-desc is NOT included here — it has its own submit-on-Enter/blur logic
+  // Note: inp-desc is NOT included here - it has its own submit-on-Enter/blur logic
   // Including it would trigger saveDraft on every keystroke, disrupting user input
   var ids = ['inp-author','inp-project','inp-place','inp-category'];
   ids.forEach(function(id) {
@@ -552,6 +553,8 @@ function bindPhotoGridClick() {
     } else if (e.target.closest('.photo-placeholder')) {
       if (currentPhotos.length < 6) { pickPhotos(); } else { openReorder(); }
     } else if (e.target.tagName === 'IMG') {
+      openReorder();
+    } else if (e.target.closest('.video-thumb')) {
       openReorder();
     }
   });
@@ -655,6 +658,7 @@ function readPhoto(file) {
   reader.onload = function(e) {
     compressPhoto(e.target.result, function(compressed) {
       currentPhotos.push(compressed);
+      mediaOrder.push({type:'photo', idx: currentPhotos.length - 1});
       renderPhotos();
       debounceAutoSave();
     });
@@ -694,6 +698,14 @@ function compressPhoto(dataUrl, cb, quality) {
 
 function removePhoto(idx) {
   currentPhotos.splice(idx, 1);
+  // Adjust mediaOrder: remove entry + shift photo indices > idx
+  mediaOrder = mediaOrder.filter(function(o) {
+    if (o.type === 'photo') {
+      if (o.idx === idx) return false; // removed
+      if (o.idx > idx) o.idx--; // shift down
+    }
+    return true;
+  });
   renderPhotos();
   debounceAutoSave();
 }
@@ -704,6 +716,14 @@ function removeVideo(idx) {
   }
   currentVideos.splice(idx, 1);
   videoThumbnails.splice(idx, 1);
+  // Adjust mediaOrder: remove entry + shift video indices > idx
+  mediaOrder = mediaOrder.filter(function(o) {
+    if (o.type === 'video') {
+      if (o.idx === idx) return false; // removed
+      if (o.idx > idx) o.idx--; // shift down
+    }
+    return true;
+  });
   renderPhotos();
   debounceAutoSave();
 }
@@ -711,9 +731,28 @@ function removeVideo(idx) {
 // Build combined media list: [{type:'photo'|'video', data:base64|Blob, idx:number}]
 function buildMediaList() {
   var list = [];
-  currentPhotos.forEach(function(p, i) { list.push({type:'photo', data:p, idx:i}); });
-  currentVideos.forEach(function(v, i) { list.push({type:'video', data:v, idx:i}); });
+  if (mediaOrder.length > 0) {
+    // Use custom mixed order
+    mediaOrder.forEach(function(o) {
+      if (o.type === 'photo' && o.idx < currentPhotos.length) {
+        list.push({type:'photo', data: currentPhotos[o.idx], idx: o.idx});
+      } else if (o.type === 'video' && o.idx < currentVideos.length) {
+        list.push({type:'video', data: currentVideos[o.idx], idx: o.idx});
+      }
+    });
+  } else {
+    // Default: all photos first, then all videos
+    currentPhotos.forEach(function(p, i) { list.push({type:'photo', data:p, idx:i}); });
+    currentVideos.forEach(function(v, i) { list.push({type:'video', data:v, idx:i}); });
+  }
   return list;
+}
+
+// Rebuild mediaOrder from current arrays (default: photos then videos)
+function rebuildMediaOrder() {
+  mediaOrder = [];
+  currentPhotos.forEach(function(_, i) { mediaOrder.push({type:'photo', idx:i}); });
+  currentVideos.forEach(function(_, i) { mediaOrder.push({type:'video', idx:i}); });
 }
 
 function getVideoThumbUrl(videoBlob) {
@@ -795,7 +834,7 @@ function playVideo(idx) {
 }
 
 // ===== VIDEO DURATION CHECK + COMPRESS =====
-var MAX_VIDEO_DURATION = 60; // 1 minute
+var MAX_VIDEO_DURATION = 20; // 20 seconds
 var MAX_VIDEO_SIZE = 20 * 1024 * 1024; // 20MB target after compress
 
 function checkAndAddVideo(file) {
@@ -803,20 +842,29 @@ function checkAndAddVideo(file) {
   var tempUrl = URL.createObjectURL(file);
   var v = document.createElement('video');
   v.preload = 'metadata';
+  v.onerror = function() {
+    URL.revokeObjectURL(tempUrl);
+    alert('无法加载视频文件\nCannot load video file');
+  };
   v.onloadedmetadata = function() {
     URL.revokeObjectURL(tempUrl);
     var dur = v.duration;
     if (dur > MAX_VIDEO_DURATION) {
-      alert('视频时长 ' + Math.round(dur) + '秒，超过1分钟限制\nVideo duration ' + Math.round(dur) + 's, exceeds 1-minute limit');
+      alert('视频时长 ' + Math.round(dur) + '秒,超过20秒限制\nVideo duration ' + Math.round(dur) + 's, exceeds 20-second limit');
       return;
     }
     // Step 2: Compress video via MediaRecorder (re-encode at lower resolution/bitrate)
     compressVideo(file, dur, function(compressedBlob) {
+      if (!compressedBlob) {
+        alert('视频压缩失败\nVideo compression failed');
+        return;
+      }
       if (currentVideos.length >= 2) {
         alert('最多2个视频 / Tối đa 2 video');
         return;
       }
       currentVideos.push(compressedBlob);
+      mediaOrder.push({type:'video', idx: currentVideos.length - 1});
       // Extract thumbnail for print/preview
       extractVideoThumbnail(compressedBlob, function(thumb) {
         videoThumbnails.push(thumb || '');
@@ -839,8 +887,15 @@ function compressVideo(file, duration, cb) {
   srcV.playsInline = true;
   srcV.preload = 'auto';
 
+  srcV.onerror = function() {
+    console.error('compressVideo: failed to load source video', srcV.error);
+    URL.revokeObjectURL(srcUrl);
+    cb(null); // Signal failure
+  };
+
   srcV.onloadedmetadata = function() {
     var w = srcV.videoWidth, h = srcV.videoHeight;
+    if (!w || !h) { console.error('compressVideo: no video dimensions'); URL.revokeObjectURL(srcUrl); cb(null); return; }
     if (w > MAX_W) { h = h * MAX_W / w; w = MAX_W; }
     if (h > MAX_H) { w = w * MAX_H / h; h = MAX_H; }
     w = Math.round(w); h = Math.round(h);
@@ -877,13 +932,16 @@ function compressVideo(file, duration, cb) {
       // Wait a tick for recorder to finalize
       setTimeout(function() { if (recorder.state === 'recording') recorder.stop(); }, 200);
     };
-    srcV.src = srcUrl;
-    srcV.play();
+    // src is ALREADY set from outer scope - just play, no redundant src assignment
+    srcV.play().catch(function(e) {
+      console.error('compressVideo: play() failed', e);
+      URL.revokeObjectURL(srcUrl);
+      if (recorder.state === 'recording') recorder.stop();
+      cb(null);
+    });
   }; // onloadedmetadata
   srcV.src = srcUrl;
 }
-
-// Extract first frame of a video Blob as base64 thumbnail (for print/preview)
 function extractVideoThumbnail(videoBlob, cb) {
   var url = URL.createObjectURL(videoBlob);
   var v = document.createElement('video');
@@ -935,12 +993,20 @@ function bindDescInput() {
 function submitDescInput(el) {
   var text = el.value.trim();
   if (!text) return;
-  var item = {text: text, translation: '(翻译中...)'};
+  // Check if text is identical to an existing desc item - skip translation
+  var duplicate = currentDescs.find(function(d) { return d.text === text; });
+  var item;
+  if (duplicate) {
+    // Copy existing translation instead of re-translating
+    item = {text: text, translation: duplicate.translation || ''};
+  } else {
+    item = {text: text, translation: '(翻译中...)'};
+  }
   currentDescs.push(item);
   el.value = '';
   renderDescs();
   debounceAutoSave();
-  translateDescItem(item);
+  if (!duplicate) translateDescItem(item);
 }
 
 function renderDescs() {
@@ -961,16 +1027,16 @@ function renderDescs() {
   display.innerHTML = html;
 }
 
-//局部更新某项描述的DOM（翻译完成后用，避免重建整个desc-display打断用户操作）
+//局部更新某项描述的DOM(翻译完成后用,避免重建整个desc-display打断用户操作)
 function updateDescItemDisplay(item) {
   var display = document.getElementById('desc-display');
   var idx = currentDescs.indexOf(item);
   if (idx < 0 || !display.children[idx]) return;
   var el = display.children[idx];
   el.onclick = function() { startEditDesc(idx); }; // Restore click handler
-  var html = '<div class="desc-text">' + escHtml(item.text) + '</div>'; 
+  var html = '<div class="desc-text">' + escHtml(item.text) + '</div>';
   if (item.translation) {
-    html += '<div class="desc-trans">' + escHtml(item.translation) + '</div>'; 
+    html += '<div class="desc-trans">' + escHtml(item.translation) + '</div>';
   }
   el.innerHTML = html;
 }
@@ -1067,7 +1133,7 @@ async function translateDescItem(item) {
     item.translation = '(翻译出错)';
     console.error('Desc translate error:', e);
   }
-  //局部更新：只刷新翻译了的那一项，不重建整个desc-display DOM
+  //局部更新:只刷新翻译了的那一项,不重建整个desc-display DOM
   updateDescItemDisplay(item);
   debounceAutoSave();
 }
@@ -1098,14 +1164,26 @@ function submitAddLine() {
   var text = addLineEl.value.trim();
   if (!text) return;
   var num = currentLines.length + 1;
-  var line = {num: num, text: text, translation: '(翻译中...)'};
+  // Check if text matches an existing line's text or translation - skip re-translation
+  var existing = currentLines.find(function(l) { return l.text === text || l.translation === text; });
+  var line;
+  if (existing) {
+    // If text matches original, copy its translation; if matches translation, it's already Vietnamese
+    if (existing.text === text) {
+      line = {num: num, text: text, translation: existing.translation || ''};
+    } else {
+      // User pasted a translation - text IS the Vietnamese, no need to translate again
+      line = {num: num, text: text, translation: ''};
+    }
+  } else {
+    line = {num: num, text: text, translation: '(翻译中...)'};
+  }
   currentLines.push(line);
   addLineEl.value = '';
   addLineEl.placeholder = '+ 添加行 / Thêm dòng';
   renderLines();
   debounceAutoSave();
-  // Auto-translate
-  translateLine(line);
+  if (!existing) translateLine(line);
 }
 
 function renderLines() {
@@ -1161,16 +1239,21 @@ function saveLine(num) {
   if (!line) return;
   var ta = document.getElementById('edit-text-' + num);
   var newText = ta ? ta.value.trim() : '';
+  var oldText = line.text;
+  // If text hasn't changed, don't re-translate - just exit edit mode
+  if (newText === oldText) {
+    renderLines();
+    return;
+  }
   line.text = newText;
   if (newText) {
-    // Always re-translate when text changes
     line.translation = '(翻译中...)';
     renderLines();
     translateLine(line);
-  } else if (!newText) {
+  } else {
     line.translation = '';
+    renderLines();
   }
-  renderLines();
   debounceAutoSave();
 }
 
@@ -1293,7 +1376,32 @@ function buildPrintPageHTML(rec) {
   var category = rec.category || '';
   var descItems = rec.descItems || [];
   var photos = rec.photos || [];
+  var videoThumbs = rec.videoThumbnails || []; // base64 thumbnail images
+  var mediaOrd = rec.mediaOrder || []; // mixed display order
   var lines = rec.lines || [];
+
+  // Build combined media list for print (videos shown as thumbnail images)
+  var printMedia = [];
+  if (mediaOrd.length > 0) {
+    mediaOrd.forEach(function(o) {
+      if (o.type === 'photo' && o.idx < photos.length) {
+        printMedia.push({type:'photo', data: photos[o.idx]});
+      } else if (o.type === 'video' && o.idx < videoThumbs.length && videoThumbs[o.idx]) {
+        printMedia.push({type:'video', data: videoThumbs[o.idx]}); // thumbnail as image
+      }
+    });
+  } else {
+    // Default: all photos first, then all video thumbnails
+    photos.forEach(function(p) { printMedia.push({type:'photo', data: p}); });
+    videoThumbs.forEach(function(t, i) { if (t) printMedia.push({type:'video', data: t}); });
+  }
+
+  function printMediaItem(m) {
+    if (m.type === 'video') {
+      return '<div style="position:relative;width:100%;height:100%"><img src="' + m.data + '" style="width:100%;height:100%;object-fit:cover"><div style="position:absolute;top:3px;left:3px;background:rgba(79,70,229,.85);color:#fff;padding:1px 5px;border-radius:3px;font-size:.6rem;font-weight:600;z-index:2">▶视频</div></div>';
+    }
+    return '<img src="' + m.data + '">';
+  }
 
   var html = '<!DOCTYPE html><html lang="zh"><head><meta charset="UTF-8">';
   html += '<title>特别注意 - ' + seqnum + '</title>';
@@ -1382,21 +1490,21 @@ function buildPrintPageHTML(rec) {
     html += '</div>';
   }
   html += '</div>';
-  // Photo grid (same layout as input page)
+  // Photo grid (same layout as input page, videos shown as thumbnail images)
   html += '<div class="photo-grid">';
-  if (photos.length >= 1) {
-    html += '<div class="photo-main"><img src="' + photos[0] + '"></div>';
+  if (printMedia.length >= 1) {
+    html += '<div class="photo-main">' + printMediaItem(printMedia[0]) + '</div>';
   } else {
     html += '<div class="photo-main"><div class="photo-placeholder">无照片</div></div>';
   }
   html += '<div class="photo-side">';
-  if (photos.length >= 2) {
-    html += '<div class="photo-2"><img src="' + photos[1] + '"></div>';
+  if (printMedia.length >= 2) {
+    html += '<div class="photo-2">' + printMediaItem(printMedia[1]) + '</div>';
   } else {
     html += '<div class="photo-2"><div class="photo-placeholder">+2</div></div>';
   }
-  if (photos.length >= 3) {
-    html += '<div class="photo-stack"><img src="' + photos[2] + '"></div>';
+  if (printMedia.length >= 3) {
+    html += '<div class="photo-stack">' + printMediaItem(printMedia[2]) + '</div>';
   } else {
     html += '<div class="photo-stack"><div class="photo-placeholder">+3</div></div>';
   }
@@ -1447,6 +1555,8 @@ function showPreview() {
     description: currentDescs.map(function(d){return d.text}).join('; '),
     descTranslation: currentDescs.map(function(d){return d.translation}).join('; '),
     photos: currentPhotos,
+    videoThumbnails: videoThumbnails,
+    mediaOrder: mediaOrder,
     lines: currentLines
   };
   // Show in inline iframe
@@ -1578,8 +1688,14 @@ async function editSelected() {
   currentPhotos = rec.photos || [];
   currentLines = rec.lines || [];
   currentLines.forEach(function(l,i){l.num=i+1;});
-  renderPhotos(); renderLines();
-  showPage('page-input');
+  // Load video Blobs from recordVideos store
+  videoThumbnails = rec.videoThumbnails || [];
+  mediaOrder = rec.mediaOrder || []; // restore mixed display order
+  loadRecordVideos(rec.id, function(videos) {
+    currentVideos = videos || [];
+    renderPhotos(); renderLines();
+    showPage('page-input');
+  });
 }
 
 // ===== EXPORT PDF =====
@@ -1625,16 +1741,16 @@ function buildExportPDFHTML(recs) {
   var bodyParts = recs.map(function(rec) {
     var recHTML = buildPrintPageHTML(rec);
     var bodyMatch = recHTML.match(/<body[^>]*>([\s\S]*?)<\/body>/);
-    return bodyMatch ? bodyMatch[1] : ''; 
+    return bodyMatch ? bodyMatch[1] : '';
   });
-  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>特别注意事项简报</title>';  
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>特别注意事项简报</title>';
   html += '<style>' + sharedCSS + '</style></head><body style="display:flex;flex-direction:column;height:auto">';
   bodyParts.forEach(function(part, i) {
     html += '<div class="export-page" style="display:flex;flex-direction:column;height:100vh">';
     html += part;
-    html += '</div>';  
+    html += '</div>';
   });
-  html += '</body></html>';  
+  html += '</body></html>';
   return html;
 }
 
@@ -1671,11 +1787,14 @@ async function exportSelectedJSON() {
 }
 
 // ===== PHOTO REORDER =====
-var reorderState = [];
+var reorderState = []; // [{type:'photo'|'video', data:base64|Blob, origPhotoIdx, origVideoIdx}]
 
 function openReorder() {
-  if (currentPhotos.length === 0) return;
-  reorderState = currentPhotos.slice();
+  var media = buildMediaList();
+  if (media.length === 0) return;
+  reorderState = media.map(function(m) {
+    return {type: m.type, data: m.data, origPhotoIdx: m.type === 'photo' ? m.idx : -1, origVideoIdx: m.type === 'video' ? m.idx : -1};
+  });
   renderReorderList();
   document.getElementById('reorder-overlay').classList.add('show');
 }
@@ -1687,19 +1806,23 @@ function closeReorder() {
 function renderReorderList() {
   var list = document.getElementById('reorder-list');
   var html = '';
-  reorderState.forEach(function(photo, idx) {
+  reorderState.forEach(function(item, idx) {
     html += '<div class="reorder-item" draggable="true" data-idx="' + idx + '"';
     html += ' ondragstart="reorderDragStart(event)" ondragover="reorderDragOver(event)" ondragenter="reorderDragEnter(event)" ondragleave="reorderDragLeave(event)" ondrop="reorderDrop(event)" ondragend="reorderDragEnd(event)"';
     html += ' ontouchstart="touchDragStart(event,\'' + idx + '\')" ontouchmove="touchDragMove(event)" ontouchend="touchDragEnd(event,\'' + idx + '\')">';
     html += '<span class="photo-idx">' + (idx + 1) + '</span>';
-    html += '<img src="' + photo + '">';
-    html += '<span class="photo-info">照片 ' + (idx + 1) + '</span>';
+    if (item.type === 'video') {
+      var thumbUrl = getVideoThumbUrl(item.data);
+      html += '<video src="' + thumbUrl + '" muted preload="metadata" style="width:60px;height:60px;object-fit:cover;border-radius:4px;flex-shrink:0"></video>';
+      html += '<span class="photo-info">视频 ' + (idx + 1) + '</span>';
+    } else {
+      html += '<img src="' + item.data + '" style="width:60px;height:60px;object-fit:cover;border-radius:4px;flex-shrink:0">';
+      html += '<span class="photo-info">照片 ' + (idx + 1) + '</span>';
+    }
     html += '<span class="drag-hint">⇅ 拖动</span>';
     html += '</div>';
   });
-  list.innerHTML = html + '<input id="inp-addline" class="add-line-box" type="text" placeholder="+ 添加行 / Thêm dòng">';
-  // Re-bind addline events since element was recreated
-  bindAddLineInput();
+  list.innerHTML = html;
 }
 
 var dragSrcIdx = null;
@@ -1805,7 +1928,16 @@ function touchDragEnd(e, idx) {
 }
 
 function confirmReorder() {
-  currentPhotos = reorderState.slice();
+  // Update mediaOrder to match the reordered list
+  mediaOrder = reorderState.map(function(item) {
+    return {type: item.type, idx: item.type === 'photo' ? item.origPhotoIdx : item.origVideoIdx};
+  });
+  // Clean up entries that reference removed items
+  mediaOrder = mediaOrder.filter(function(o) {
+    if (o.type === 'photo') return o.idx < currentPhotos.length;
+    if (o.type === 'video') return o.idx < currentVideos.length;
+    return false;
+  });
   renderPhotos();
   debounceAutoSave();
   closeReorder();
@@ -1813,7 +1945,7 @@ function confirmReorder() {
 
 // ===== ARCHIVE & NEW FORM =====
 function archiveAndNewForm() {
-  var hasData = currentPhotos.length > 0 || currentLines.length > 0 || currentDescs.length > 0
+  var hasData = currentPhotos.length > 0 || currentVideos.length > 0 || currentLines.length > 0 || currentDescs.length > 0
     || document.getElementById('inp-author').value.trim()
     || document.getElementById('inp-place').value;
   if (hasData) {
@@ -1845,6 +1977,7 @@ function saveCurrentToDB(cb) {
     lines: currentLines,
     photos: currentPhotos,
     videoThumbnails: videoThumbnails, // base64 thumbnails for print/preview
+    mediaOrder: mediaOrder, // mixed display order [{type, idx}]
     createdAt: editingId ? undefined : Date.now()
   };
   if (editingId) {
@@ -1867,6 +2000,7 @@ function saveCurrentToDB(cb) {
         existing.lines = rec.lines;
         existing.photos = rec.photos;
         existing.videoThumbnails = rec.videoThumbnails;
+        existing.mediaOrder = rec.mediaOrder;
         store.put(existing);
       } else {
         rec.createdAt = Date.now();
@@ -1900,6 +2034,7 @@ function saveCurrentToDB(cb) {
         existing.lines = rec.lines;
         existing.photos = rec.photos;
         existing.videoThumbnails = rec.videoThumbnails;
+        existing.mediaOrder = rec.mediaOrder;
         var tx2 = db.transaction(DB_STORE, 'readwrite');
         var store2 = tx2.objectStore(DB_STORE);
         store2.put(existing);
@@ -1917,15 +2052,51 @@ function saveCurrentToDB(cb) {
 
 // Save video Blobs to recordVideos store (separate from record metadata)
 function saveRecordVideos(recId, cb) {
-  if (!db || currentVideos.length === 0) { if(cb) cb(); return; }
-  var tx = db.transaction('recordVideos', 'readwrite');
+  if (!db) { if(cb) cb(); return; }
+  // Step 1: Delete old video entries for this record (vid_0 through vid_9)
+  // This handles the case where videos were removed
+  var tx1 = db.transaction('recordVideos', 'readwrite');
+  var store1 = tx1.objectStore('recordVideos');
+  for (var i = 0; i < 10; i++) {
+    store1.delete(recId + '_vid_' + i);
+  }
+  tx1.oncomplete = function() {
+    // Step 2: Write current videos
+    if (currentVideos.length === 0) { if(cb) cb(); return; }
+    var tx2 = db.transaction('recordVideos', 'readwrite');
+    var store2 = tx2.objectStore('recordVideos');
+    currentVideos.forEach(function(blob, i) {
+      store2.put({id: recId + '_vid_' + i, data: blob});
+    });
+    tx2.oncomplete = function() { if(cb) cb(); };
+  };
+}
+
+// Load video Blobs from recordVideos store for a given record id
+function loadRecordVideos(recId, cb) {
+  if (!db) { if(cb) cb([]); return; }
+  // Try to load by specific keys: recId_vid_0, recId_vid_1, ... up to 10
+  // This preserves order and is more efficient than cursor iteration
+  var tx = db.transaction('recordVideos', 'readonly');
   var store = tx.objectStore('recordVideos');
-  // Clear old videos for this record
-  // Store each video blob with record id as prefix
-  currentVideos.forEach(function(blob, i) {
-    store.put({id: recId + '_vid_' + i, data: blob});
-  });
-  tx.oncomplete = function() { if(cb) cb(); };
+  var videos = new Array(10);
+  var found = 0;
+  for (var i = 0; i < 10; i++) {
+    var key = recId + '_vid_' + i;
+    var req = store.get(key);
+    req.onsuccess = (function(idx) { return function(e) {
+      if (e.target.result) {
+        videos[idx] = e.target.result.data;
+        found++;
+      }
+    }; })(i);
+  }
+  tx.oncomplete = function() {
+    // Compact the array (remove undefined slots) preserving order
+    var result = videos.filter(function(v) { return v !== undefined; });
+    if (cb) cb(result);
+  };
+  tx.onerror = function() { if(cb) cb([]); };
 }
 
 function doNewForm() {
@@ -1935,6 +2106,7 @@ function doNewForm() {
   currentPhotos = [];
   currentVideos = [];
   videoThumbnails = [];
+  mediaOrder = [];
   currentLines = [];
   currentDescs = [];
   document.getElementById('inp-project').value = '';
